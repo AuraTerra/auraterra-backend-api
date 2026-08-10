@@ -1,0 +1,12 @@
+RewriteEngine On
+
+# 1. Si piden /public o /public/ de forma explícita, los redirigimos limpiamente a la raíz amigable, La barra es opcional
+RewriteRule ^public/?$ /auraTerraMayo/ [R=301,L]
+
+# 2. Si el recurso solicitado existe físicamente en las carpetas (CSS, JS, imágenes), dejarlo pasar directo
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 3. Para todo lo demás (login, register, dashboard), procesarlo mediante el index.php central de la raíz
+RewriteRule ^(.*)$ index.php [L,QSA]
