@@ -5,7 +5,12 @@ namespace Src\Controllers;
 
 class ClimaController 
 {
-    private string $apiKey = '3dbd3ceab1f4f0c1727abc805e731d13'; 
+private string $apiKey;
+
+public function __construct() {
+    // Lee la variable desde el archivo .env
+    $this->apiKey = $_ENV['OPENWEATHER_API_KEY'] ?? getenv('OPENWEATHER_API_KEY') ?? '';
+}
 
     //Retorna las condiciones climáticas del momento.
     public function handleClimaActual(): void 

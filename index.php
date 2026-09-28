@@ -56,7 +56,11 @@ $clientIP = $limiter->getClientIP();
 
 $uri = $_SERVER['REQUEST_URI'] ?? '/'; //Le saca lo del error y le deja la url limpia de nuevo
 $path = parse_url($uri, PHP_URL_PATH);
-$path = str_replace(['/auraTerraMayo/public', '/auraTerraMayo'], '', $path);
+$path = str_replace(
+    ['/auraTerraMayo/auraterra-backend-api/public', '/auraTerraMayo/auraterra-backend-api', '/auraTerraMayo'],
+    '',
+    $path
+);//$path = str_replace(['/auraTerraMayo/public', '/auraTerraMayo'], '', $path);
 $path = '/' . ltrim($path, '/');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
