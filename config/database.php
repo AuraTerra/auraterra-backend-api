@@ -1,5 +1,5 @@
 <?php
-require_once 'C:/x/htdocs/auraTerraMayo/vendor/autoload.php';
+require_once 'C:/htdocs/auraTerraMayo/vendor/autoload.php';
 
 use Illuminate\Database\Capsule\Manager as Capsule; 
 
