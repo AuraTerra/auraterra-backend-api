@@ -21,7 +21,12 @@ $dirAlmacenamientoLimiter = __DIR__ . '/storage/rate_limiter';
 // 1. Requerir archivos de Repositorios, Servicios y Controladores
 require_once __DIR__ . '/src/Repositories/UsuarioRepositoryInterface.php';
 require_once __DIR__ . '/src/Repositories/UsuarioRepository.php';
+require_once __DIR__ . '/src/Repositories/ClimaRepositoryInterface.php';
+require_once __DIR__ . '/src/Repositories/OpenWeatherRepository.php';
+
 require_once __DIR__ . '/src/Services/AuthService.php';
+require_once __DIR__ . '/src/Services/ClimaService.php';
+
 require_once __DIR__ . '/src/Controllers/AuthController.php';
 require_once __DIR__ . '/src/Controllers/ClimaController.php';
 
@@ -46,7 +51,13 @@ try {
 $usuarioRepo    = new \Src\Repositories\UsuarioRepository($pdo);
 $authService    = new \Src\Services\AuthService($usuarioRepo);
 $authController = new \Src\Controllers\AuthController($authService);
-$climaController = new \Src\Controllers\ClimaController();
+
+// Repositorio y Servicio de Clima (API Externa)
+$apiKey          = $_ENV['OPENWEATHER_API_KEY'] ?? getenv('OPENWEATHER_API_KEY') ?: '';
+$baseUrl         = 'https://api.openweathermap.org/data/2.5/weather';
+$climaRepo       = new \Src\Repositories\OpenWeatherRepository();
+$climaService    = new \Services\ClimaService($apiKey, $baseUrl, $climaRepo);
+$climaController = new \Src\Controllers\ClimaController($climaService);
 
 class RateLimiter {
     private string $storageDir; 
