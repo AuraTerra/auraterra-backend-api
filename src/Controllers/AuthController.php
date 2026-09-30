@@ -1,41 +1,17 @@
 <?php
 declare(strict_types=1); 
+
 namespace Src\Controllers;
 
+use Src\Services\AuthService;
+
 class AuthController {
-    private \PDO $pdo;
+    private AuthService $authService;
 
-    public function __construct() {
-        $host = 'localhost'; $db = 'auraterra_db'; $user = 'root'; $pass = ''; $charset = 'utf8mb4';
-        $dsn = "mysql:host=$host;dbname=$db;charset=$charset"; 
-        $options = [
-            \PDO::ATTR_ERRMODE            => \PDO::ERRMODE_EXCEPTION,
-            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-            \PDO::ATTR_EMULATE_PREPARES   => false,
-        ];
-        try {
-            $this->pdo = new \PDO($dsn, $user, $pass, $options); 
-            $this->autoRepararEstructuraDb($this->pdo);
-        } catch (\PDOException $e) {
-            $this->jsonResponse(['error' => 'Error crítico de base de datos'], 500);
-        }
+    public function __construct(AuthService $authService) {
+        $this->authService = $authService;
     }
 
-    private function autoRepararEstructuraDb(\PDO $pdo): void {
-        try {
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE email = 'admin@auraterra.com'");
-            $stmt->execute();
-            if ((int)$stmt->fetchColumn() === 0) {
-                $passHash = password_hash('Admin123!', PASSWORD_DEFAULT);
-                $stmtInsert = $pdo->prepare("INSERT INTO usuarios (nombre, email, password, rol, estado) VALUES ('Administradores', 'admin@auraterra.com', ?, 'admin', 'activo')");
-                $stmtInsert->execute([$passHash]);
-            }
-        } catch (\Exception $e) {}
-    }
-
-    /**
-     * Helper centralizado para emitir respuestas únicamente en formato JSON.
-     */
     private function jsonResponse(array $data, int $statusCode = 200): void {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code($statusCode);
@@ -44,7 +20,6 @@ class AuthController {
     }
 
     public function handleOpenRegisterPost(): void {
-        // En un backend API REST, es preferible capturar JSON del body (o $_POST como fallback)
         $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
         $nombre   = trim($input['nombre'] ?? '');
@@ -59,26 +34,8 @@ class AuthController {
             ], 400);
         }
 
-        try {
-            $passHash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $this->pdo->prepare("INSERT INTO usuarios (nombre, email, password, rol, estado) VALUES (?, ?, ?, ?, 'prueba')");
-            $stmt->execute([$nombre, $email, $passHash, $rol]);
-            
-            $this->jsonResponse([
-                'status'  => 'success',
-                'message' => '¡Te has registrado con éxito!',
-                'data'    => [
-                    'email' => $email,
-                    'nombre' => $nombre,
-                    'rol' => $rol
-                ]
-            ], 201);
-        } catch (\PDOException $e) {
-            $this->jsonResponse([
-                'status'  => 'error',
-                'message' => 'El usuario ya existe o la solicitud no se pudo procesar.'
-            ], 400);
-        }
+        $res = $this->authService->registrarUsuario($nombre, $email, $password, $rol);
+        $this->jsonResponse(['status' => $res['success'] ? 'success' : 'error', 'message' => $res['message'], 'data' => $res['data'] ?? null], $res['code']);
     }
     
     public function handleLoginPost(): void {
@@ -94,44 +51,28 @@ class AuthController {
             ], 400);
         }
 
-        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE email = ?");
-        $stmt->execute([$email]);
-        $user = $stmt->fetch();
-
-        if ($user && password_verify($password, $user['password'])) {
-            if ($user['estado'] === 'suspendido') {
-                $this->jsonResponse([
-                    'status'  => 'error',
-                    'message' => 'La cuenta de usuario se encuentra suspendida.'
-                ], 403);
-            }
-
+        $res = $this->authService->autenticarUsuario($email, $password);
+        if ($res['success']) {
             if (session_status() === PHP_SESSION_NONE) {
                 @session_start();
             }
-
-            $_SESSION['user_id']     = $user['id'];
-            $_SESSION['user_nombre'] = $user['nombre'];
-            $_SESSION['user_email']  = $user['email'];
-            $_SESSION['user_rol']    = $user['rol'];
-            $_SESSION['user_estado'] = $user['estado'];
+            $_SESSION['user_id']     = $res['user']['id'];
+            $_SESSION['user_nombre'] = $res['user']['nombre'];
+            $_SESSION['user_email']  = $res['user']['email'];
+            $_SESSION['user_rol']    = $res['user']['rol'];
+            $_SESSION['user_estado'] = $res['user']['estado'];
 
             $this->jsonResponse([
                 'status'  => 'success',
-                'message' => 'Inicio de sesión exitoso',
-                'user'    => [
-                    'id'     => $user['id'],
-                    'nombre' => $user['nombre'],
-                    'email'  => $user['email'],
-                    'rol'    => $user['rol']
-                ]
+                'message' => $res['message'],
+                'user'    => $res['user']
             ], 200);
         }
 
         $this->jsonResponse([
             'status'  => 'error',
-            'message' => 'Credenciales incorrectas: Correo o clave inválidos.'
-        ], 401);
+            'message' => $res['message']
+        ], $res['code']);
     }
 
     public function handleLogout(): void {

@@ -18,8 +18,35 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $dirAlmacenamientoLimiter = __DIR__ . '/storage/rate_limiter';
 
+// 1. Requerir archivos de Repositorios, Servicios y Controladores
+require_once __DIR__ . '/src/Repositories/UsuarioRepositoryInterface.php';
+require_once __DIR__ . '/src/Repositories/UsuarioRepository.php';
+require_once __DIR__ . '/src/Services/AuthService.php';
 require_once __DIR__ . '/src/Controllers/AuthController.php';
 require_once __DIR__ . '/src/Controllers/ClimaController.php';
+
+// 2. Conexión a la base de datos PDO
+$host = 'localhost'; $db = 'auraterra_db'; $user = 'root'; $pass = ''; $charset = 'utf8mb4';
+$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$options = [
+    \PDO::ATTR_ERRMODE            => \PDO::ERRMODE_EXCEPTION,
+    \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+    \PDO::ATTR_EMULATE_PREPARES   => false,
+];
+
+try {
+    $pdo = new \PDO($dsn, $user, $pass, $options);
+} catch (\PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Error de conexión a la base de datos']);
+    exit;
+}
+
+// 3. Inyección de dependencias (Repository -> Service -> Controller)
+$usuarioRepo    = new \Src\Repositories\UsuarioRepository($pdo);
+$authService    = new \Src\Services\AuthService($usuarioRepo);
+$authController = new \Src\Controllers\AuthController($authService);
+$climaController = new \Src\Controllers\ClimaController();
 
 class RateLimiter {
     private string $storageDir; 
@@ -94,9 +121,6 @@ if (!$limiter->check($clientIP) || isset($_GET['error_suspension_manual']) || (i
     ]);
     exit;
 }
-
-$authController = new \Src\Controllers\AuthController();
-$climaController = new \Src\Controllers\ClimaController();
 
 // 🚦 Enrutador REST API
 if ($path === '/' || $path === '/index.php' || $path === '') {
