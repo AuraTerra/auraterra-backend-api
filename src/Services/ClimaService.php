@@ -1,76 +1,39 @@
 <?php
-namespace Services;
 
-use Src\Repositories\ClimaRepositoryInterface;
+namespace App\Services;
+
+use App\Repositories\ClimaRepositoryInterface;
 
 class ClimaService
 {
-    private string $apiKey;
-    private string $baseUrlActual;
-    private string $baseUrlForecast;
     private ClimaRepositoryInterface $climaRepo;
 
-    public function __construct(string $apiKey, string $baseUrlActual, ClimaRepositoryInterface $climaRepo)
+    public function __construct(ClimaRepositoryInterface $climaRepo)
     {
-        $this->apiKey = $apiKey;
-        $this->baseUrlActual = $baseUrlActual;
-        $this->baseUrlForecast = str_replace('/weather', '/forecast', $baseUrlActual);
         $this->climaRepo = $climaRepo;
     }
 
     public function obtenerActual(array $params): array
     {
-        $url = $this->baseUrlActual . '?appid=' . $this->apiKey . '&units=metric&lang=es';
-        
-        if (isset($params['lat'], $params['lon'])) {
-            $url .= "&lat={$params['lat']}&lon={$params['lon']}";
-        } elseif (isset($params['ciudad'])) {
-            $url .= "&q=" . urlencode($params['ciudad']);
-        } else {
-            return ['error' => true, 'codigo' => 400, 'mensaje' => 'Faltan parámetros'];
+        // Validar parámetros requeridos
+        if (!isset($params['ciudad']) && (!isset($params['lat']) || !isset($params['lon']))) {
+            return [
+                'error' => true,
+                'codigo' => 400,
+                'mensaje' => 'Faltan parámetros requeridos (ciudad o lat/lon)'
+            ];
         }
 
-        $res = $this->climaRepo->consultarApiExterna($url);
-        if ($res['error']) {
+        // Delegar la obtención al repositorio sin saber nada de la URL ni de OpenWeather
+        $res = $this->climaRepo->obtenerClimaActual($params);
+
+        if (isset($res['error']) && $res['error']) {
             return $res;
         }
 
-        $datos = $res['data'];
         return [
             'error' => false,
-            'data' => [
-                'temperatura' => $datos['main']['temp'] ?? null,
-                'humedad'     => $datos['main']['humidity'] ?? null,
-                'viento'      => $datos['wind']['speed'] ?? null,
-                'descripcion' => $datos['weather'][0]['description'] ?? null,
-                'fuente'      => 'OpenWeatherMap',
-                'timestamp'   => date('Y-m-d H:i:s'),
-                'ubicacion'   => $datos['name'] ?? 'Desconocida', 
-            ]
-        ];
-    }
-
-    public function obtenerPronostico(array $params): array
-    {
-        $url = $this->baseUrlForecast . '?appid=' . $this->apiKey . '&units=metric&lang=es';
-
-        if (isset($params['lat'], $params['lon'])) {
-            $url .= "&lat={$params['lat']}&lon={$params['lon']}";
-        } elseif (isset($params['ciudad'])) {
-            $url .= "&q=" . urlencode($params['ciudad']);
-        } else {
-            return ['error' => true, 'codigo' => 400, 'mensaje' => 'Faltan parámetros'];
-        }
-
-        $resultado = $this->climaRepo->consultarApiExterna($url);
-
-        if ($resultado['error']) {
-            return $resultado;
-        }
-
-        return [
-            'error' => false,
-            'data' => $resultado['data']['list'] ?? []
+            'data' => $res['data'] ?? $res
         ];
     }
 }

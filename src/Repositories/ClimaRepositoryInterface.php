@@ -1,9 +1,7 @@
 <?php
-declare(strict_types=1);
-
-namespace Src\Repositories;
+namespace App\Repositories;
 
 interface ClimaRepositoryInterface
 {
-    public function consultarApiExterna(string $url): array;
+    public function obtenerClimaActual(array $params): array;
 }
