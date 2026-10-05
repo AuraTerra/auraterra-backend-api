@@ -18,34 +18,27 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $dirAlmacenamientoLimiter = __DIR__ . '/storage/rate_limiter';
 
-// 1. Requerir archivos de Configuración, Repositorios, Servicios y Controladores
+// 1. Inclusión de componentes arquitectónicos
 require_once __DIR__ . '/src/Config/Database.php';
 
 require_once __DIR__ . '/src/Repositories/UsuarioRepositoryInterface.php';
 require_once __DIR__ . '/src/Repositories/UsuarioRepository.php';
-require_once __DIR__ . '/src/Repositories/ClimaRepositoryInterface.php';
-require_once __DIR__ . '/src/Repositories/OpenWeatherRepository.php';
 
 require_once __DIR__ . '/src/Services/AuthService.php';
-require_once __DIR__ . '/src/Services/ClimaService.php';
 
 require_once __DIR__ . '/src/Controllers/AuthController.php';
 require_once __DIR__ . '/src/Controllers/ClimaController.php';
 
-// 2. Conexión centralizada a la base de datos PDO (Usando la clase Database)
+// 2. Conexión centralizada a la base de datos PDO
 $pdo = \Src\Config\Database::getConnection();
 
-// 3. Inyección de dependencias (Repository -> Service -> Controller)
+// 3. Inyección de dependencias
 $usuarioRepo    = new \Src\Repositories\UsuarioRepository($pdo);
 $authService    = new \Src\Services\AuthService($usuarioRepo);
 $authController = new \Src\Controllers\AuthController($authService);
 
-// Repositorio y Servicio de Clima (API Externa)
-$apiKey          = $_ENV['OPENWEATHER_API_KEY'] ?? getenv('OPENWEATHER_API_KEY') ?: '';
-$baseUrl         = 'https://api.openweathermap.org/data/2.5/weather';
-$climaRepo       = new \Src\Repositories\OpenWeatherRepository();
-$climaService    = new \Services\ClimaService($apiKey, $baseUrl, $climaRepo);
-$climaController = new \Src\Controllers\ClimaController($climaService);
+// Controlador de Clima (Consenso multianálisis: OpenWeather + WeatherAPI + Tomorrow.io)
+$climaController = new \Src\Controllers\ClimaController();
 
 class RateLimiter {
     private string $storageDir; 
@@ -105,11 +98,11 @@ $clientIP = $limiter->getClientIP();
 
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
 $path = parse_url($uri, PHP_URL_PATH);
-$path = str_replace(['/auraTerraMayo/public', '/auraTerraMayo'], '', $path);
+$path = str_replace(['/auraterra-backend-api', '/auraTerraMayo/public', '/auraTerraMayo'], '', $path);
 $path = '/' . ltrim($path, '/');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Interceptor perimetral contra Bots y Cuentas de usuarios suspendidas
+// Interceptor perimetral contra Bots y Cuentas suspendidas
 if (!$limiter->check($clientIP) || isset($_GET['error_suspension_manual']) || (isset($_SESSION['user_estado']) && $_SESSION['user_estado'] === 'suspendido')) {
     http_response_code(429);
     echo json_encode([
@@ -152,6 +145,106 @@ if ($path === '/login') {
     $climaController->handleClimaActual();
 } elseif ($path === '/clima/pronostico') {
     $climaController->handleClimaPronostico();
+} elseif ($path === '/registrar_click') {
+    if ($method === 'POST') {
+        $componente = trim($_POST['componente'] ?? 'Acción General');
+        $usuarioNombre = $_SESSION['user_nombre'] ?? 'Usuario';
+        try {
+            $stmt = $pdo->prepare("INSERT INTO telemetria_clicks (usuario, ip_origen, componente_clickeado, fecha_hora) VALUES (?, ?, ?, NOW())");
+            $stmt->execute([$usuarioNombre, $clientIP, $componente]);
+            echo json_encode(['success' => true, 'status' => 'ok']);
+        } catch (\Exception $e) {
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        }
+        exit;
+    }
+} elseif ($path === '/admin/telemetria') {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        // Aseguramos columnas necesarias sin interrumpir ejecución
+        try {
+            $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'prueba'");
+            $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+        } catch (\Exception $ignored) {}
+
+        // 1. Suspender automáticamente cuentas de prueba con más de 7 días
+        try {
+            $pdo->exec("UPDATE usuarios 
+                        SET estado = 'suspendido' 
+                        WHERE estado = 'prueba' 
+                        AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
+        } catch (\Exception $ignored) {}
+
+        // 2. Ranking de consultas más frecuentes
+        $ranking = [];
+        try {
+            $stmtRanking = $pdo->query("SELECT componente_clickeado, COUNT(*) as total FROM telemetria_clicks GROUP BY componente_clickeado ORDER BY total DESC LIMIT 5");
+            $ranking = $stmtRanking->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (\Exception $ignored) {}
+
+        // 3. Últimos eventos
+        $ultimos = [];
+        try {
+            $stmtClicks = $pdo->query("SELECT usuario, componente_clickeado, fecha_hora FROM telemetria_clicks ORDER BY id DESC LIMIT 10");
+            $ultimos = $stmtClicks->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (\Exception $ignored) {}
+
+        // 4. Listado seguro de usuarios y cálculo de días restantes
+        $stmtUsuarios = $pdo->query("SELECT id, nombre, email, rol, estado, created_at FROM usuarios ORDER BY id DESC");
+        $filasUsuarios = $stmtUsuarios->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $usuarios = [];
+        $ahora = time();
+        foreach ($filasUsuarios as $u) {
+            $fechaCreacion = !empty($u['created_at']) ? strtotime($u['created_at']) : $ahora;
+            $diasTranscurridos = (int)floor(($ahora - $fechaCreacion) / 86400);
+            $diasRestantes = max(0, 7 - $diasTranscurridos);
+
+            $usuarios[] = [
+                'id'             => (int)$u['id'],
+                'nombre'         => $u['nombre'] ?? 'Sin Nombre',
+                'email'          => $u['email'] ?? '',
+                'rol'            => $u['rol'] ?? 'agricultor',
+                'estado'         => $u['estado'] ?? 'prueba',
+                'dias_restantes' => $diasRestantes
+            ];
+        }
+
+        echo json_encode([
+            "status"   => "ok",
+            "ranking"  => $ranking,
+            "ultimos"  => $ultimos,
+            "usuarios" => $usuarios
+        ]);
+    } catch (\Exception $e) {
+        http_response_code(500);
+        echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+    }
+    exit;
+
+} elseif ($path === '/admin/cambiar_estado') {
+    header('Content-Type: application/json; charset=utf-8');
+    if ($method !== 'POST') {
+        http_response_code(405);
+        echo json_encode(["status" => "error", "message" => "Método no permitido"]);
+        exit;
+    }
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $userId = (int)($input['user_id'] ?? 0);
+    $nuevoEstado = trim($input['estado'] ?? '');
+
+    if ($userId > 0 && in_array($nuevoEstado, ['activo', 'prueba', 'suspendido'])) {
+        try {
+            $stmt = $pdo->prepare("UPDATE usuarios SET estado = ? WHERE id = ?");
+            $stmt->execute([$nuevoEstado, $userId]);
+            echo json_encode(["status" => "ok", "message" => "Estado actualizado con éxito"]);
+        } catch (\Exception $e) {
+            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+        }
+    } else {
+        echo json_encode(["status" => "error", "message" => "Datos inválidos"]);
+    }
+    exit;
 } else {
     http_response_code(404);
     echo json_encode([
