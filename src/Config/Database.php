@@ -8,11 +8,11 @@ use PDOException;
 
 class Database {
     public static function getConnection(): PDO {
-        $host    = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost';
-        $db      = $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'auraterra_db';
-        $user    = $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'root';
-        $pass    = $_ENV['DB_PASS'] ?? getenv('DB_PASS') ?: '';
-        $charset = $_ENV['DB_CHARSET'] ?? getenv('DB_CHARSET') ?: 'utf8mb4';
+        $host    = 'localhost';
+        $db      = 'auraterra_db';
+        $user    = 'root';
+        $pass    = '';
+        $charset = 'utf8mb4';
 
         $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
         $options = [
@@ -27,7 +27,7 @@ class Database {
             http_response_code(500);
             echo json_encode([
                 'status'  => 'error',
-                'message' => 'Error de conexión a la base de datos'
+                'message' => 'Error de conexión a la base de datos local: ' . $e->getMessage()
             ]);
             exit;
         }

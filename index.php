@@ -1,11 +1,11 @@
 <?php
 declare(strict_types=1);
 
-// 🌐 CONFIGURACIÓN CORS (Permite peticiones desde la Web y la App Móvil)
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
-header("Content-Type: application/json; charset=utf-8");
+// 🌐 CONFIGURACIÓN CORS (Permite peticiones desde Web y Mobile)
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Credentials: true');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -18,14 +18,11 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $dirAlmacenamientoLimiter = __DIR__ . '/storage/rate_limiter';
 
-// 1. Inclusión de componentes arquitectónicos
+// 1. Inclusión de componentes
 require_once __DIR__ . '/src/Config/Database.php';
-
 require_once __DIR__ . '/src/Repositories/UsuarioRepositoryInterface.php';
 require_once __DIR__ . '/src/Repositories/UsuarioRepository.php';
-
 require_once __DIR__ . '/src/Services/AuthService.php';
-
 require_once __DIR__ . '/src/Controllers/AuthController.php';
 require_once __DIR__ . '/src/Controllers/ClimaController.php';
 
@@ -36,8 +33,6 @@ $pdo = \Src\Config\Database::getConnection();
 $usuarioRepo    = new \Src\Repositories\UsuarioRepository($pdo);
 $authService    = new \Src\Services\AuthService($usuarioRepo);
 $authController = new \Src\Controllers\AuthController($authService);
-
-// Controlador de Clima (Consenso multianálisis: OpenWeather + WeatherAPI + Tomorrow.io)
 $climaController = new \Src\Controllers\ClimaController();
 
 class RateLimiter {
@@ -46,13 +41,13 @@ class RateLimiter {
     private int $windowSeconds; 
     private int $blockDuration;
 
-    public function __construct(string $storageDir, int $maxRequests = 8, int $windowSeconds = 10, int $blockDuration = 60) {
+    public function __construct(string $storageDir, int $maxRequests = 50, int $windowSeconds = 10, int $blockDuration = 60) {
         $this->storageDir = rtrim($storageDir, '/'); 
         $this->maxRequests = $maxRequests; 
         $this->windowSeconds = $windowSeconds; 
         $this->blockDuration = $blockDuration;
         if (!is_dir($this->storageDir)) { 
-            mkdir($this->storageDir, 0755, true); 
+            @mkdir($this->storageDir, 0777, true); 
         }
     }
 
@@ -63,63 +58,50 @@ class RateLimiter {
         return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
     }
 
-    public function isBlocked(string $ip): bool {
-        $blockFile = $this->storageDir . '/blocked_' . md5($ip) . '.json';
-        if (!file_exists($blockFile)) return false;
-        $data = json_decode(file_get_contents($blockFile), true);
-        if ($data['blocked_until'] > time()) return true;
-        @unlink($blockFile); 
-        return false;
-    }
-
     public function check(string $ip): bool {
-        if ($this->isBlocked($ip)) return false;
+        if (!is_writable($this->storageDir)) return true;
         $logFile = $this->storageDir . '/log_' . md5($ip) . '.json'; 
         $now = time(); 
         $windowStart = $now - $this->windowSeconds;
-        $log = file_exists($logFile) ? json_decode(file_get_contents($logFile), true) : ['requests' => []];
+        $log = file_exists($logFile) ? @json_decode(@file_get_contents($logFile), true) : ['requests' => []];
+        if (!is_array($log) || !isset($log['requests'])) $log = ['requests' => []];
         $log['requests'] = array_filter($log['requests'], fn($ts) => $ts > $windowStart);
         
         if (count($log['requests']) >= $this->maxRequests) {
-            $blockData = ['ip' => $ip, 'blocked_at' => $now, 'blocked_until' => $now + $this->blockDuration];
-            file_put_contents($this->storageDir . '/blocked_' . md5($ip) . '.json', json_encode($blockData, JSON_PRETTY_PRINT));
-            @unlink($logFile); 
             return false;
         }
         
         $log['requests'][] = $now; 
-        file_put_contents($logFile, json_encode($log)); 
+        @file_put_contents($logFile, json_encode($log)); 
         return true;
     }
 }
 
-$limiter = new RateLimiter($dirAlmacenamientoLimiter, 8, 10, 60);
+$limiter = new RateLimiter($dirAlmacenamientoLimiter, 50, 10, 60);
 $clientIP = $limiter->getClientIP();
 
-$uri = $_SERVER['REQUEST_URI'] ?? '/';
-$path = parse_url($uri, PHP_URL_PATH);
-$path = str_replace(['/auraterra-backend-api', '/auraTerraMayo/public', '/auraTerraMayo'], '', $path);
+$rawPath = $_GET['ruta'] ?? parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+$path = str_replace(['/auraterra-backend-api/index.php', '/auraterra-backend-api', '/index.php'], '', $rawPath);
 $path = '/' . ltrim($path, '/');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Interceptor perimetral contra Bots y Cuentas suspendidas
+// Interceptor perimetral
 if (!$limiter->check($clientIP) || isset($_GET['error_suspension_manual']) || (isset($_SESSION['user_estado']) && $_SESSION['user_estado'] === 'suspendido')) {
     http_response_code(429);
     echo json_encode([
         'status'  => 'error',
         'code'    => 429,
-        'message' => 'Acceso Restringido: Se detectó comportamiento automatizado (Bot) o la cuenta se encuentra suspendida.',
-        'soporte' => 'AuraTerraClima@hotmail.com'
+        'message' => 'Acceso Restringido: Demasiadas solicitudes o cuenta suspendida.'
     ]);
     exit;
 }
 
 // 🚦 Enrutador REST API
-if ($path === '/' || $path === '/index.php' || $path === '') {
+if ($path === '/' || $path === '') {
     http_response_code(200);
     echo json_encode([
         'status'  => 'online',
-        'service' => 'AuraTerra Backend API',
+        'service' => 'AuraTerra Backend API (Local)',
         'version' => '1.0.0'
     ]);
     exit;
@@ -130,14 +112,14 @@ if ($path === '/login') {
         $authController->handleLoginPost();
     } else {
         http_response_code(405);
-        echo json_encode(['status' => 'error', 'message' => 'Método no permitido. Use POST.']);
+        echo json_encode(['status' => 'error', 'message' => 'Método no permitido.']);
     }
 } elseif ($path === '/register') {
     if ($method === 'POST') {
         $authController->handleOpenRegisterPost();
     } else {
         http_response_code(405);
-        echo json_encode(['status' => 'error', 'message' => 'Método no permitido. Use POST.']);
+        echo json_encode(['status' => 'error', 'message' => 'Método no permitido.']);
     }
 } elseif ($path === '/logout') {
     $authController->handleLogout();
@@ -147,11 +129,11 @@ if ($path === '/login') {
     $climaController->handleClimaPronostico();
 } elseif ($path === '/registrar_click') {
     if ($method === 'POST') {
-        $componente = trim($_POST['componente'] ?? 'Acción General');
-        $usuarioNombre = $_SESSION['user_nombre'] ?? 'Usuario';
+        $componente = trim($_POST['componente'] ?? 'Acción');
+        $usuario = $_SESSION['user_nombre'] ?? 'Usuario Local';
         try {
             $stmt = $pdo->prepare("INSERT INTO telemetria_clicks (usuario, ip_origen, componente_clickeado, fecha_hora) VALUES (?, ?, ?, NOW())");
-            $stmt->execute([$usuarioNombre, $clientIP, $componente]);
+            $stmt->execute([$usuario, $clientIP, $componente]);
             echo json_encode(['success' => true, 'status' => 'ok']);
         } catch (\Exception $e) {
             echo json_encode(['success' => false, 'error' => $e->getMessage()]);
@@ -161,37 +143,27 @@ if ($path === '/login') {
 } elseif ($path === '/admin/telemetria') {
     header('Content-Type: application/json; charset=utf-8');
     try {
-        // Aseguramos columnas necesarias sin interrumpir ejecución
         try {
             $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS estado VARCHAR(50) DEFAULT 'prueba'");
             $pdo->exec("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
         } catch (\Exception $ignored) {}
 
-        // 1. Suspender automáticamente cuentas de prueba con más de 7 días
+        // Suspender cuentas de prueba de más de 7 días
         try {
-            $pdo->exec("UPDATE usuarios 
-                        SET estado = 'suspendido' 
-                        WHERE estado = 'prueba' 
-                        AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
+            $pdo->exec("UPDATE usuarios SET estado = 'suspendido' WHERE estado = 'prueba' AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
         } catch (\Exception $ignored) {}
 
-        // 2. Ranking de consultas más frecuentes
-        $ranking = [];
-        try {
-            $stmtRanking = $pdo->query("SELECT componente_clickeado, COUNT(*) as total FROM telemetria_clicks GROUP BY componente_clickeado ORDER BY total DESC LIMIT 5");
-            $ranking = $stmtRanking->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (\Exception $ignored) {}
+        // Ranking (Top 15)
+        $stmtRanking = $pdo->query("SELECT componente_clickeado, COUNT(*) as total FROM telemetria_clicks GROUP BY componente_clickeado ORDER BY total DESC LIMIT 15");
+        $ranking = $stmtRanking ? ($stmtRanking->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
-        // 3. Últimos eventos
-        $ultimos = [];
-        try {
-            $stmtClicks = $pdo->query("SELECT usuario, componente_clickeado, fecha_hora FROM telemetria_clicks ORDER BY id DESC LIMIT 10");
-            $ultimos = $stmtClicks->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (\Exception $ignored) {}
+        // Últimos 50 eventos
+        $stmtClicks = $pdo->query("SELECT usuario, componente_clickeado, fecha_hora FROM telemetria_clicks ORDER BY id DESC LIMIT 50");
+        $ultimos = $stmtClicks ? ($stmtClicks->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
-        // 4. Listado seguro de usuarios y cálculo de días restantes
+        // Usuarios y cálculo de prueba
         $stmtUsuarios = $pdo->query("SELECT id, nombre, email, rol, estado, created_at FROM usuarios ORDER BY id DESC");
-        $filasUsuarios = $stmtUsuarios->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $filasUsuarios = $stmtUsuarios ? ($stmtUsuarios->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
         $usuarios = [];
         $ahora = time();
@@ -221,7 +193,6 @@ if ($path === '/login') {
         echo json_encode(["status" => "error", "message" => $e->getMessage()]);
     }
     exit;
-
 } elseif ($path === '/admin/cambiar_estado') {
     header('Content-Type: application/json; charset=utf-8');
     if ($method !== 'POST') {
@@ -247,9 +218,6 @@ if ($path === '/login') {
     exit;
 } else {
     http_response_code(404);
-    echo json_encode([
-        'status'  => 'error',
-        'message' => 'Endpoint no encontrado'
-    ]);
+    echo json_encode(['status' => 'error', 'message' => 'Ruta no encontrada: ' . $path]);
     exit;
 }
