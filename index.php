@@ -18,8 +18,9 @@ if (session_status() === PHP_SESSION_NONE) {
 
 $dirAlmacenamientoLimiter = __DIR__ . '/storage/rate_limiter';
 
-// 1. Inclusión de componentes
+// Inclusión de componentes
 require_once __DIR__ . '/src/Config/Database.php';
+require_once __DIR__ . '/src/Models/Usuario.php'; // 👈 Aseguramos que la clase siempre exista en memoria
 require_once __DIR__ . '/src/Repositories/UsuarioRepositoryInterface.php';
 require_once __DIR__ . '/src/Repositories/UsuarioRepository.php';
 require_once __DIR__ . '/src/Services/AuthService.php';
