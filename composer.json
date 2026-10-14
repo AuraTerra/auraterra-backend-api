@@ -1,6 +1,17 @@
 {
+    "name": "usuario/auraterra-backend-api",
+    "autoload": {
+        "psr-4": {
+            "Usuario\\AuraterraBackendApi\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "folmerja-cmyk",
+            "email": "folmerja@gmail.com"
+        }
+    ],
     "require": {
-        "illuminate/database": "*",
-        "illuminate/events": "^12.61"
+        "illuminate/database": "^12.61"
     }
 }
